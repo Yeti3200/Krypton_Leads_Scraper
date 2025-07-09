@@ -165,9 +165,29 @@ def scrape_google_maps(business_type, location):
                 try:
                     print(f"🔍 Processing business {i+1}/20...")
                     
-                    # Click on the listing to get details
-                    listing.click()
-                    time.sleep(2)
+                    # Click on the listing to get details with retry logic
+                    clicked = False
+                    for attempt in range(2):  # Try up to 2 times
+                        try:
+                            # Scroll element into view first
+                            listing.scroll_into_view_if_needed()
+                            time.sleep(0.5)
+                            
+                            # Try to click
+                            listing.click(timeout=10000)
+                            time.sleep(2)
+                            clicked = True
+                            break
+                        except Exception as click_error:
+                            if attempt == 0:
+                                print(f"⚠️ Click attempt {attempt + 1} failed for business {i+1}, retrying...")
+                                time.sleep(1)
+                            else:
+                                print(f"⚠️ Failed to click business {i+1} after {attempt + 1} attempts: {str(click_error)[:100]}...")
+                                time.sleep(1)
+                    
+                    if not clicked:
+                        continue
                     
                     # Extract business information
                     business_data = {
