@@ -134,6 +134,7 @@ def scrape_google_maps(business_type, location):
             search_query = f"{business_type} {location}"
             maps_url = f"https://www.google.com/maps/search/{search_query.replace(' ', '+')}"
             
+            print(f"🌐 Navigating to: {maps_url}")
             page.goto(maps_url, wait_until='domcontentloaded', timeout=60000)
             time.sleep(5)
             
@@ -150,15 +151,39 @@ def scrape_google_maps(business_type, location):
                 page.evaluate('window.scrollTo(0, document.body.scrollHeight)')
                 time.sleep(2)
             
-            # Find all business listings
-            listings = page.query_selector_all('[role="article"]')
+            # Find all business listings with multiple selectors
+            selectors_tried = []
+            listings = []
             
-            # Try alternative selectors if no listings found
-            if not listings:
-                listings = page.query_selector_all('[data-result-index]')
-            if not listings:
-                listings = page.query_selector_all('div[jsaction*="mouseover"]')
+            # Try various selectors for business listings
+            selectors = [
+                '[role="article"]',
+                '[data-result-index]', 
+                'div[jsaction*="mouseover"]',
+                'div[jsaction*="click"]',
+                'a[data-cid]',
+                'div[data-cid]',
+                '.hfpxzc',
+                '[data-result-ad-index]'
+            ]
             
+            for selector in selectors:
+                listings = page.query_selector_all(selector)
+                selectors_tried.append(f"{selector}: {len(listings)} found")
+                if len(listings) > 0:
+                    print(f"✅ Using selector '{selector}' - found {len(listings)} businesses")
+                    break
+            
+            if not listings:
+                print("❌ No business listings found with any selector!")
+                print("🔍 Selectors tried:")
+                for attempt in selectors_tried:
+                    print(f"   - {attempt}")
+                
+                # Take a screenshot for debugging
+                page.screenshot(path="debug_google_maps.png")
+                print("📸 Screenshot saved as 'debug_google_maps.png' for debugging")
+                
             print(f"📍 Found {len(listings)} potential businesses")
             
             for i, listing in enumerate(listings[:20]):  # Limit to first 20 results
@@ -215,31 +240,61 @@ def scrape_google_maps(business_type, location):
                         'tiktok': ''
                     }
                     
-                    # Get business name
-                    name_element = page.query_selector('h1')
-                    if name_element:
-                        business_data['name'] = name_element.inner_text().strip()
+                    # Get business name with multiple selectors
+                    name_selectors = ['h1', '[data-attrid="title"]', '.x3AX1-LfntMc-header-title-title', '.SPZz6b h1']
+                    for selector in name_selectors:
+                        name_element = page.query_selector(selector)
+                        if name_element:
+                            business_data['name'] = name_element.inner_text().strip()
+                            break
                     
-                    # Get website
-                    website_element = page.query_selector('a[href*="http"]:has-text("Website")')
-                    if not website_element:
-                        website_element = page.query_selector('[data-value="Website"] a')
-                    if website_element:
-                        business_data['website'] = website_element.get_attribute('href')
+                    # Get website with multiple selectors
+                    website_selectors = [
+                        'a[href*="http"]:has-text("Website")',
+                        '[data-value="Website"] a',
+                        'a[data-item-id*="authority"]',
+                        'a[href*="http"]:not([href*="google"])',
+                        '.CsEnBe a[href*="http"]'
+                    ]
+                    for selector in website_selectors:
+                        website_element = page.query_selector(selector)
+                        if website_element:
+                            href = website_element.get_attribute('href')
+                            if href and 'google' not in href and 'maps' not in href:
+                                business_data['website'] = href
+                                break
                     
-                    # Get phone number
-                    phone_element = page.query_selector('button[data-item-id*="phone"]')
-                    if not phone_element:
-                        phone_element = page.query_selector('[data-value*="phone"] span')
-                    if phone_element:
-                        business_data['phone'] = phone_element.inner_text().strip()
+                    # Get phone number with multiple selectors
+                    phone_selectors = [
+                        'button[data-item-id*="phone"]',
+                        '[data-value*="phone"] span',
+                        'span[data-phone]',
+                        'button:has-text("Call")',
+                        '.z5jxId'
+                    ]
+                    for selector in phone_selectors:
+                        phone_element = page.query_selector(selector)
+                        if phone_element:
+                            phone_text = phone_element.inner_text().strip()
+                            if phone_text and len(phone_text) > 5:
+                                business_data['phone'] = phone_text
+                                break
                     
-                    # Get address
-                    address_element = page.query_selector('button[data-item-id="address"]')
-                    if not address_element:
-                        address_element = page.query_selector('[data-value="Address"] div')
-                    if address_element:
-                        business_data['address'] = address_element.inner_text().strip()
+                    # Get address with multiple selectors
+                    address_selectors = [
+                        'button[data-item-id="address"]',
+                        '[data-value="Address"] div',
+                        '.Io6YTe',
+                        'button:has-text("Directions")',
+                        '.rogA2c'
+                    ]
+                    for selector in address_selectors:
+                        address_element = page.query_selector(selector)
+                        if address_element:
+                            address_text = address_element.inner_text().strip()
+                            if address_text:
+                                business_data['address'] = address_text
+                                break
                     
                     if business_data['name']:
                         businesses.append(business_data)
