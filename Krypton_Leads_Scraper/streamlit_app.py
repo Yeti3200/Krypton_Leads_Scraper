@@ -69,6 +69,31 @@ st.markdown("""
         border-radius: 8px;
         margin: 1rem 0;
     }
+    .status-container {
+        background: #f8f9fa;
+        border: 1px solid #dee2e6;
+        border-radius: 8px;
+        padding: 1rem;
+        margin: 1rem 0;
+        font-family: 'Courier New', monospace;
+    }
+    .current-status {
+        background: #e3f2fd;
+        border-left: 4px solid #2196f3;
+        padding: 0.8rem;
+        margin: 0.5rem 0;
+        border-radius: 4px;
+        font-weight: bold;
+    }
+    .recent-activity {
+        background: #f5f5f5;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        padding: 0.5rem;
+        max-height: 200px;
+        overflow-y: auto;
+        font-size: 0.85rem;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -109,7 +134,7 @@ def export_to_google_sheets(df, business_type, location):
         st.error(f"Error creating Google Sheet: {e}")
         return None
 
-def run_scraper_with_output(business_type, location, output_format):
+def run_scraper_with_realtime_output(business_type, location, output_format, status_container):
     """Run the scraper and show real-time output"""
     try:
         # Prepare the command
@@ -130,10 +155,77 @@ def run_scraper_with_output(business_type, location, output_format):
         process.stdin.write(f"{output_format}\n")
         process.stdin.flush()
         
-        # Wait for completion
-        stdout, stderr = process.communicate(timeout=300)
+        # Read output in real-time
+        output_lines = []
+        current_status = "🚀 Starting scraper..."
         
-        return process.returncode == 0, stdout, stderr
+        with status_container:
+            status_expander = st.expander("📊 Live Scraping Status", expanded=True)
+            status_text = status_expander.empty()
+            
+            while True:
+                output = process.stdout.readline()
+                if output == '' and process.poll() is not None:
+                    break
+                if output:
+                    line = output.strip()
+                    output_lines.append(line)
+                    
+                    # Update status based on output
+                    if "Searching Google Maps" in line:
+                        current_status = "🔍 Searching Google Maps for businesses..."
+                    elif "Navigating to:" in line:
+                        current_status = f"🌐 Loading Google Maps page..."
+                    elif "Loading more results" in line:
+                        current_status = "📜 Loading more business listings..."
+                    elif "Found" in line and "potential businesses" in line:
+                        business_count = line.split("Found ")[1].split(" potential")[0]
+                        current_status = f"📍 Found {business_count} businesses to process"
+                    elif "Using selector" in line:
+                        current_status = "✅ Successfully located business listings"
+                    elif "Processing business" in line:
+                        business_num = line.split("Processing business ")[1] if "Processing business" in line else "N/A"
+                        current_status = f"🔍 Processing business {business_num}"
+                    elif "Added:" in line:
+                        business_name = line.split("Added: ")[1] if "Added:" in line else "business"
+                        current_status = f"✅ Successfully scraped: {business_name}"
+                    elif "Failed to click" in line:
+                        current_status = "⚠️ Skipping problematic business listing..."
+                    elif "Scraping website" in line:
+                        current_status = "🌐 Extracting contact information from websites..."
+                    elif "Creating Google Sheet" in line:
+                        current_status = "📊 Creating Google Sheet with results..."
+                    elif "SCRAPING COMPLETE" in line:
+                        current_status = "🎉 Scraping completed successfully!"
+                    elif "ERROR" in line or "Error" in line:
+                        current_status = "❌ Error encountered, checking next business..."
+                    
+                    # Update the status display with styled formatting
+                    status_text.markdown(f"""
+                    <div class="status-container">
+                        <div class="current-status">
+                            📊 Current Status: {current_status}
+                        </div>
+                        <div style="margin-top: 1rem;">
+                            <strong>🔍 Recent Activity:</strong>
+                            <div class="recent-activity">
+                                {chr(10).join(output_lines[-8:]) if output_lines else "Initializing..."}
+                            </div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+        
+        # Wait for completion
+        process.wait()
+        
+        # Get any remaining output
+        remaining_stdout, stderr = process.communicate()
+        if remaining_stdout:
+            output_lines.extend(remaining_stdout.split('\n'))
+        
+        full_output = '\n'.join(output_lines)
+        
+        return process.returncode == 0, full_output, stderr
         
     except subprocess.TimeoutExpired:
         return False, "", "Scraper timed out after 5 minutes"
@@ -196,33 +288,45 @@ def main():
                 format_map = {"CSV Only": "1", "Google Sheets": "2", "Both": "3"}
                 format_choice = format_map[output_format]
                 
-                # Show progress
+                # Show progress with real-time status
+                st.info(f"🔍 Scraping '{business_type}' businesses in '{location}'...")
+                
+                # Create containers for progress and status
                 progress_container = st.container()
+                status_container = st.container()
+                
                 with progress_container:
-                    st.info(f"🔍 Scraping '{business_type}' businesses in '{location}'...")
-                    
-                    # Progress bar
                     progress_bar = st.progress(0)
-                    status_text = st.empty()
+                    # Simulate progress bar (visual feedback)
+                    progress_placeholder = st.empty()
                     
-                    # Simulate progress
-                    for i in range(100):
-                        time.sleep(0.05)
-                        progress_bar.progress(i + 1)
-                        if i < 20:
-                            status_text.text("🔍 Searching Google Maps...")
-                        elif i < 60:
-                            status_text.text("📍 Extracting business information...")
-                        elif i < 90:
-                            status_text.text("🌐 Scraping websites for contact info...")
-                        else:
-                            status_text.text("💾 Saving results...")
+                    # Start the scraper with real-time output
+                    import threading
                     
-                    # Run the actual scraper
-                    success, stdout, stderr = run_scraper_with_output(business_type, location, format_choice)
+                    def update_progress():
+                        for i in range(100):
+                            time.sleep(0.3)  # Slower progress for better UX
+                            progress_bar.progress(i + 1)
+                            if i < 30:
+                                progress_placeholder.text("🔍 Initializing scraper...")
+                            elif i < 60:
+                                progress_placeholder.text("📍 Processing businesses...")
+                            elif i < 90:
+                                progress_placeholder.text("🌐 Extracting contact info...")
+                            else:
+                                progress_placeholder.text("💾 Finalizing results...")
                     
+                    # Run progress bar in background
+                    progress_thread = threading.Thread(target=update_progress)
+                    progress_thread.daemon = True
+                    progress_thread.start()
+                    
+                    # Run the actual scraper with real-time output
+                    success, stdout, stderr = run_scraper_with_realtime_output(business_type, location, format_choice, status_container)
+                    
+                    # Clean up progress indicators
                     progress_bar.empty()
-                    status_text.empty()
+                    progress_placeholder.empty()
                 
                 if success:
                     st.success("✅ Scraping completed successfully!")
