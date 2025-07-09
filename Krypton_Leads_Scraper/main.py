@@ -169,12 +169,26 @@ def scrape_google_maps(business_type, location):
                     clicked = False
                     for attempt in range(2):  # Try up to 2 times
                         try:
-                            # Scroll element into view first
-                            listing.scroll_into_view_if_needed()
-                            time.sleep(0.5)
+                            # Try to scroll element into view with timeout
+                            try:
+                                listing.scroll_into_view_if_needed(timeout=5000)
+                                time.sleep(0.5)
+                            except:
+                                # If scrolling fails, try without scrolling
+                                pass
                             
-                            # Try to click
-                            listing.click(timeout=10000)
+                            # Try to click with multiple fallback methods
+                            try:
+                                listing.click(timeout=8000)
+                            except:
+                                try:
+                                    # Force click if normal click fails
+                                    listing.click(force=True, timeout=5000)
+                                except:
+                                    # Last resort: focus and press enter
+                                    listing.focus()
+                                    page.keyboard.press('Enter')
+                            
                             time.sleep(2)
                             clicked = True
                             break
@@ -183,7 +197,7 @@ def scrape_google_maps(business_type, location):
                                 print(f"⚠️ Click attempt {attempt + 1} failed for business {i+1}, retrying...")
                                 time.sleep(1)
                             else:
-                                print(f"⚠️ Failed to click business {i+1} after {attempt + 1} attempts: {str(click_error)[:100]}...")
+                                print(f"⚠️ Failed to click business {i+1} after {attempt + 1} attempts")
                                 time.sleep(1)
                     
                     if not clicked:
