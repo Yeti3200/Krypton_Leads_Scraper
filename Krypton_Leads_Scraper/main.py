@@ -120,10 +120,12 @@ def scrape_google_maps(business_type, location):
     print(f"\n🔍 Searching Google Maps for '{business_type}' in '{location}'...")
     
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = p.chromium.launch(headless=True, args=['--no-sandbox', '--disable-dev-shm-usage'])
         context = browser.new_context(
             user_agent=get_random_user_agent(),
-            viewport={'width': 1920, 'height': 1080}
+            viewport={'width': 1920, 'height': 1080},
+            locale='en-US',
+            timezone_id='America/New_York'
         )
         page = context.new_page()
         
@@ -132,11 +134,15 @@ def scrape_google_maps(business_type, location):
             search_query = f"{business_type} {location}"
             maps_url = f"https://www.google.com/maps/search/{search_query.replace(' ', '+')}"
             
-            page.goto(maps_url, wait_until='networkidle')
-            time.sleep(3)
+            page.goto(maps_url, wait_until='domcontentloaded', timeout=60000)
+            time.sleep(5)
             
             # Wait for results to load
-            page.wait_for_selector('[role="main"]', timeout=10000)
+            try:
+                page.wait_for_selector('[role="main"]', timeout=15000)
+            except:
+                # Try alternative selector if main fails
+                page.wait_for_selector('[data-value="Directions"]', timeout=15000)
             
             # Scroll to load more results
             print("📜 Loading more results...")
@@ -146,6 +152,12 @@ def scrape_google_maps(business_type, location):
             
             # Find all business listings
             listings = page.query_selector_all('[role="article"]')
+            
+            # Try alternative selectors if no listings found
+            if not listings:
+                listings = page.query_selector_all('[data-result-index]')
+            if not listings:
+                listings = page.query_selector_all('div[jsaction*="mouseover"]')
             
             print(f"📍 Found {len(listings)} potential businesses")
             
