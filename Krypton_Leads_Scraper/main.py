@@ -27,9 +27,7 @@ def check_and_install_dependencies():
         'playwright',
         'beautifulsoup4', 
         'requests',
-        'pandas',
-        'gspread',
-        'google-auth'
+        'pandas'
     ]
     
     missing_packages = []
