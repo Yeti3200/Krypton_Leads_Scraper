@@ -120,12 +120,28 @@ def scrape_google_maps(business_type, location):
     print(f"\n🔍 Searching Google Maps for '{business_type}' in '{location}'...")
     
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True, args=['--no-sandbox', '--disable-dev-shm-usage'])
+        browser = p.chromium.launch(
+            headless=True, 
+            args=[
+                '--no-sandbox', 
+                '--disable-dev-shm-usage',
+                '--disable-blink-features=AutomationControlled',
+                '--disable-extensions',
+                '--disable-plugins',
+                '--disable-images',
+                '--disable-javascript',
+                '--disable-gpu',
+                '--memory-pressure-off',
+                '--max_old_space_size=4096'
+            ]
+        )
         context = browser.new_context(
             user_agent=get_random_user_agent(),
             viewport={'width': 1920, 'height': 1080},
             locale='en-US',
-            timezone_id='America/New_York'
+            timezone_id='America/New_York',
+            java_script_enabled=True,
+            ignore_https_errors=True
         )
         page = context.new_page()
         
@@ -135,8 +151,8 @@ def scrape_google_maps(business_type, location):
             maps_url = f"https://www.google.com/maps/search/{search_query.replace(' ', '+')}"
             
             print(f"🌐 Navigating to: {maps_url}")
-            page.goto(maps_url, wait_until='domcontentloaded', timeout=60000)
-            time.sleep(5)
+            page.goto(maps_url, wait_until='domcontentloaded', timeout=30000)
+            time.sleep(2)
             
             # Wait for results to load
             try:
@@ -145,11 +161,11 @@ def scrape_google_maps(business_type, location):
                 # Try alternative selector if main fails
                 page.wait_for_selector('[data-value="Directions"]', timeout=15000)
             
-            # Scroll to load more results
+            # Scroll to load more results - optimized
             print("📜 Loading more results...")
-            for i in range(5):  # Scroll 5 times to load more results
+            for i in range(3):  # Reduced scrolling for speed
                 page.evaluate('window.scrollTo(0, document.body.scrollHeight)')
-                time.sleep(2)
+                time.sleep(1)  # Reduced wait time
             
             # Find all business listings with multiple selectors
             selectors_tried = []
@@ -190,40 +206,37 @@ def scrape_google_maps(business_type, location):
                 try:
                     print(f"🔍 Processing business {i+1}/20...")
                     
-                    # Click on the listing to get details with retry logic
+                    # Optimized click handling with fast fallbacks
                     clicked = False
                     for attempt in range(2):  # Try up to 2 times
                         try:
-                            # Try to scroll element into view with timeout
+                            # Quick scroll check
                             try:
-                                listing.scroll_into_view_if_needed(timeout=5000)
-                                time.sleep(0.5)
+                                listing.scroll_into_view_if_needed(timeout=2000)
+                                time.sleep(0.2)
                             except:
-                                # If scrolling fails, try without scrolling
                                 pass
                             
-                            # Try to click with multiple fallback methods
+                            # Fast click with immediate fallbacks
                             try:
-                                listing.click(timeout=8000)
+                                listing.click(timeout=3000)
                             except:
                                 try:
-                                    # Force click if normal click fails
-                                    listing.click(force=True, timeout=5000)
+                                    listing.click(force=True, timeout=2000)
                                 except:
-                                    # Last resort: focus and press enter
                                     listing.focus()
                                     page.keyboard.press('Enter')
                             
-                            time.sleep(2)
+                            time.sleep(1)  # Reduced wait time
                             clicked = True
                             break
                         except Exception as click_error:
                             if attempt == 0:
                                 print(f"⚠️ Click attempt {attempt + 1} failed for business {i+1}, retrying...")
-                                time.sleep(1)
+                                time.sleep(0.5)  # Faster retry
                             else:
                                 print(f"⚠️ Failed to click business {i+1} after {attempt + 1} attempts")
-                                time.sleep(1)
+                                time.sleep(0.5)
                     
                     if not clicked:
                         continue
@@ -300,7 +313,7 @@ def scrape_google_maps(business_type, location):
                         businesses.append(business_data)
                         print(f"✅ Added: {business_data['name']}")
                     
-                    time.sleep(1)  # Rate limiting
+                    time.sleep(0.5)  # Reduced rate limiting
                     
                 except Exception as e:
                     print(f"⚠️ Error processing business {i+1}: {e}")
@@ -403,8 +416,8 @@ def scrape_website_info(url):
         session = requests.Session()
         session.headers.update(headers)
         
-        # Try to get the main page
-        response = session.get(url, timeout=10)
+        # Try to get the main page with faster timeout
+        response = session.get(url, timeout=5)
         response.raise_for_status()
         
         soup = BeautifulSoup(response.content, 'html.parser')
@@ -426,11 +439,11 @@ def scrape_website_info(url):
             if any(word in href for word in ['contact', 'about', 'connect']):
                 contact_urls.append(urljoin(url, link['href']))
         
-        # Scrape contact pages for additional info
-        for contact_url in contact_urls[:2]:  # Only check first 2 contact pages
+        # Scrape contact pages for additional info - optimized
+        for contact_url in contact_urls[:1]:  # Only check first contact page for speed
             try:
-                time.sleep(1)  # Rate limiting
-                contact_response = session.get(contact_url, timeout=10)
+                time.sleep(0.5)  # Reduced rate limiting
+                contact_response = session.get(contact_url, timeout=5)
                 contact_response.raise_for_status()
                 
                 contact_soup = BeautifulSoup(contact_response.content, 'html.parser')
@@ -466,24 +479,53 @@ def scrape_website_info(url):
         return {'email': '', 'instagram': '', 'facebook': '', 'tiktok': ''}
 
 def enrich_business_data(businesses):
-    """Enrich business data with website information"""
+    """Enrich business data with website information using parallel processing"""
+    import concurrent.futures
+    import threading
+    
     print(f"\n🌐 Scraping websites for {len(businesses)} businesses...")
     
-    for i, business in enumerate(businesses):
-        if business['website']:
-            print(f"🔍 Scraping website {i+1}/{len(businesses)}: {business['name']}")
+    # Filter businesses that have websites
+    businesses_with_websites = [b for b in businesses if b['website']]
+    businesses_without_websites = [b for b in businesses if not b['website']]
+    
+    def scrape_single_business(business_data):
+        """Scrape a single business website"""
+        try:
+            print(f"🔍 Scraping website: {business_data['name']}")
+            website_info = scrape_website_info(business_data['website'])
             
-            website_info = scrape_website_info(business['website'])
+            business_data['email'] = website_info['email']
+            business_data['instagram'] = website_info['instagram']
+            business_data['facebook'] = website_info['facebook']
+            business_data['tiktok'] = website_info['tiktok']
             
-            business['email'] = website_info['email']
-            business['instagram'] = website_info['instagram']
-            business['facebook'] = website_info['facebook']
-            business['tiktok'] = website_info['tiktok']
-            
-            # Rate limiting
-            time.sleep(random.uniform(1, 3))
-        else:
-            print(f"⚠️ No website found for: {business['name']}")
+            # Small delay to be respectful
+            time.sleep(random.uniform(0.5, 1.5))
+            return business_data
+        except Exception as e:
+            print(f"⚠️ Error scraping {business_data['name']}: {e}")
+            return business_data
+    
+    # Use ThreadPoolExecutor for concurrent website scraping
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        # Submit all website scraping tasks
+        future_to_business = {
+            executor.submit(scrape_single_business, business): business 
+            for business in businesses_with_websites
+        }
+        
+        # Process completed tasks
+        for future in concurrent.futures.as_completed(future_to_business):
+            business = future_to_business[future]
+            try:
+                future.result()  # This will raise an exception if the task failed
+            except Exception as e:
+                print(f"⚠️ Failed to scrape {business['name']}: {e}")
+    
+    # Add businesses without websites back to the list
+    for business in businesses_without_websites:
+        print(f"⚠️ No website found for: {business['name']}")
     
     return businesses
 
