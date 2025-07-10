@@ -348,65 +348,6 @@ st.markdown("""
         line-height: 1.4;
     }
     
-    /* Location suggestions styling */
-    .location-suggestions {
-        background: linear-gradient(135deg, #21262D 0%, #30363D 100%);
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        border-radius: 12px;
-        margin-top: 0.5rem;
-        max-height: 200px;
-        overflow-y: auto;
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-        backdrop-filter: blur(10px);
-    }
-    
-    .suggestion-item {
-        padding: 0.8rem 1.2rem;
-        color: #F0F6FC;
-        cursor: pointer;
-        transition: all 0.2s ease;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-    }
-    
-    .suggestion-item:hover {
-        background: linear-gradient(135deg, #58A6FF 0%, #79C0FF 100%);
-        color: #FFFFFF;
-        transform: translateX(4px);
-    }
-    
-    .suggestion-item:last-child {
-        border-bottom: none;
-    }
-    
-    .suggestion-icon {
-        opacity: 0.7;
-    }
-    
-    /* Custom styling for suggestion buttons */
-    .stButton[data-testid*="suggestion"] > button {
-        background: transparent;
-        border: none;
-        color: #F0F6FC;
-        padding: 0.8rem 1.2rem;
-        font-weight: 500;
-        width: 100%;
-        text-align: left;
-        border-radius: 0;
-        transition: all 0.2s ease;
-        font-size: 0.95rem;
-        height: auto;
-        box-shadow: none;
-    }
-    
-    .stButton[data-testid*="suggestion"] > button:hover {
-        background: linear-gradient(135deg, #58A6FF 0%, #79C0FF 100%);
-        color: #FFFFFF;
-        transform: translateX(4px);
-        box-shadow: none;
-    }
     
     /* Responsive design */
     @media (max-width: 768px) {
@@ -434,10 +375,6 @@ if 'results' not in st.session_state:
     st.session_state.results = None
 if 'scraping' not in st.session_state:
     st.session_state.scraping = False
-if 'location_suggestions' not in st.session_state:
-    st.session_state.location_suggestions = []
-if 'selected_location' not in st.session_state:
-    st.session_state.selected_location = ""
 
 # Common US cities for autocomplete
 MAJOR_CITIES = [
@@ -478,25 +415,6 @@ MAJOR_CITIES = [
     "Sunnyvale, CA", "Torrance, CA", "Lakewood, CO", "Miami Beach, FL", "Killeen, TX"
 ]
 
-def get_location_suggestions(query: str) -> list:
-    """Get location suggestions based on user input"""
-    if not query or len(query) < 2:
-        return []
-    
-    query = query.lower()
-    suggestions = []
-    
-    # Find matching cities
-    for city in MAJOR_CITIES:
-        if query in city.lower():
-            suggestions.append(city)
-    
-    # Sort by relevance (starts with query first, then contains)
-    starts_with = [s for s in suggestions if s.lower().startswith(query)]
-    contains = [s for s in suggestions if query in s.lower() and not s.lower().startswith(query)]
-    
-    # Return top 5 suggestions
-    return (starts_with + contains)[:5]
 
 async def scrape_leads(business_type: str, location: str, max_results: int):
     """Scrape leads from Google Maps"""
@@ -612,42 +530,17 @@ business_type = st.text_input(
     key="business_type"
 )
 
-# Location input with icon and autocomplete
-location_input = st.text_input(
-    "📍 Location", 
-    placeholder="Start typing... (e.g., Clevl for Cleveland)",
-    help="City and state where you want to search",
-    key="location",
-    value=st.session_state.selected_location
+# Location input - simple and works
+location = st.selectbox(
+    "📍 Location",
+    options=["Choose a city..."] + sorted(MAJOR_CITIES),
+    index=0,
+    help="Select your city and state"
 )
 
-# Get suggestions when user types
-if location_input and location_input != st.session_state.selected_location:
-    st.session_state.location_suggestions = get_location_suggestions(location_input)
-    st.session_state.selected_location = ""
-elif not location_input:
-    st.session_state.location_suggestions = []
-    st.session_state.selected_location = ""
-
-# Display location suggestions
-if st.session_state.location_suggestions:
-    st.markdown('<div class="location-suggestions">', unsafe_allow_html=True)
-    
-    for suggestion in st.session_state.location_suggestions:
-        if st.button(
-            f"📍 {suggestion}",
-            key=f"suggestion_{suggestion}",
-            help=f"Click to select {suggestion}",
-            use_container_width=True
-        ):
-            st.session_state.selected_location = suggestion
-            st.session_state.location_suggestions = []
-            st.rerun()
-    
-    st.markdown('</div>', unsafe_allow_html=True)
-
-# Use selected location or input
-location = st.session_state.selected_location or location_input
+# Don't use the placeholder text
+if location == "Choose a city...":
+    location = ""
 
 # Number of results slider
 max_results = st.slider(
