@@ -21,6 +21,12 @@ try:
 except ImportError:
     GOOGLE_SHEETS_AVAILABLE = False
 
+import os
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
 def check_and_install_dependencies():
     """Check if required packages are installed and prompt user to install if missing"""
     required_packages = [
@@ -121,27 +127,52 @@ def scrape_google_maps(business_type, location):
     
     with sync_playwright() as p:
         browser = p.chromium.launch(
-            headless=True, 
+            headless=True,
             args=[
-                '--no-sandbox', 
+                '--no-sandbox',
                 '--disable-dev-shm-usage',
                 '--disable-blink-features=AutomationControlled',
                 '--disable-extensions',
                 '--disable-plugins',
                 '--disable-images',
-                '--disable-javascript',
                 '--disable-gpu',
+                '--disable-web-security',
+                '--disable-features=TranslateUI',
+                '--disable-ipc-flooding-protection',
+                '--disable-renderer-backgrounding',
+                '--disable-backgrounding-occluded-windows',
+                '--disable-client-side-phishing-detection',
+                '--disable-sync',
+                '--disable-default-apps',
+                '--no-first-run',
+                '--no-default-browser-check',
                 '--memory-pressure-off',
-                '--max_old_space_size=4096'
+                '--max_old_space_size=4096',
+                '--aggressive-cache-discard',
+                '--disable-background-timer-throttling',
+                '--disable-hang-monitor',
+                '--disable-prompt-on-repost',
+                '--disable-background-networking',
+                '--disable-breakpad',
+                '--disable-component-extensions-with-background-pages',
+                '--disable-features=AudioServiceOutOfProcess',
+                '--disable-domain-reliability'
             ]
         )
         context = browser.new_context(
             user_agent=get_random_user_agent(),
-            viewport={'width': 1920, 'height': 1080},
+            viewport={'width': 1280, 'height': 720},  # Smaller viewport for speed
             locale='en-US',
             timezone_id='America/New_York',
             java_script_enabled=True,
-            ignore_https_errors=True
+            ignore_https_errors=True,
+            bypass_csp=True,
+            extra_http_headers={
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Accept-Encoding': 'gzip, deflate',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1'
+            }
         )
         page = context.new_page()
         
@@ -151,21 +182,21 @@ def scrape_google_maps(business_type, location):
             maps_url = f"https://www.google.com/maps/search/{search_query.replace(' ', '+')}"
             
             print(f"🌐 Navigating to: {maps_url}")
-            page.goto(maps_url, wait_until='domcontentloaded', timeout=30000)
-            time.sleep(2)
+            page.goto(maps_url, wait_until='networkidle', timeout=20000)
             
-            # Wait for results to load
+            # Wait for results to load with optimized selectors
             try:
-                page.wait_for_selector('[role="main"]', timeout=15000)
+                page.wait_for_selector('[role="main"], .hfpxzc, [data-result-index]', timeout=10000)
             except:
-                # Try alternative selector if main fails
-                page.wait_for_selector('[data-value="Directions"]', timeout=15000)
+                print("⚠️ Main selectors failed, trying backup...")
+                page.wait_for_selector('div[jsaction], a[data-cid]', timeout=8000)
             
-            # Scroll to load more results - optimized
+            # Optimized scrolling - faster and more efficient
             print("📜 Loading more results...")
-            for i in range(3):  # Reduced scrolling for speed
-                page.evaluate('window.scrollTo(0, document.body.scrollHeight)')
-                time.sleep(1)  # Reduced wait time
+            page.evaluate('document.querySelector("[role=main]")?.scrollTo(0, 2000)')
+            time.sleep(0.5)
+            page.evaluate('document.querySelector("[role=main]")?.scrollTo(0, 4000)')
+            time.sleep(0.5)
             
             # Find all business listings with multiple selectors
             selectors_tried = []
@@ -180,7 +211,12 @@ def scrape_google_maps(business_type, location):
                 'a[data-cid]',
                 'div[data-cid]',
                 '.hfpxzc',
-                '[data-result-ad-index]'
+                '[data-result-ad-index]',
+                '.Nv2PK',
+                '.lI9IFe',
+                '.VkpGBb',
+                'div[data-feature-id]',
+                'a[href*="/maps/place/"]'
             ]
             
             for selector in selectors:
@@ -206,42 +242,7 @@ def scrape_google_maps(business_type, location):
                 try:
                     print(f"🔍 Processing business {i+1}/20...")
                     
-                    # Optimized click handling with fast fallbacks
-                    clicked = False
-                    for attempt in range(2):  # Try up to 2 times
-                        try:
-                            # Quick scroll check
-                            try:
-                                listing.scroll_into_view_if_needed(timeout=2000)
-                                time.sleep(0.2)
-                            except:
-                                pass
-                            
-                            # Fast click with immediate fallbacks
-                            try:
-                                listing.click(timeout=3000)
-                            except:
-                                try:
-                                    listing.click(force=True, timeout=2000)
-                                except:
-                                    listing.focus()
-                                    page.keyboard.press('Enter')
-                            
-                            time.sleep(1)  # Reduced wait time
-                            clicked = True
-                            break
-                        except Exception as click_error:
-                            if attempt == 0:
-                                print(f"⚠️ Click attempt {attempt + 1} failed for business {i+1}, retrying...")
-                                time.sleep(0.5)  # Faster retry
-                            else:
-                                print(f"⚠️ Failed to click business {i+1} after {attempt + 1} attempts")
-                                time.sleep(0.5)
-                    
-                    if not clicked:
-                        continue
-                    
-                    # Extract business information
+                    # First, try to extract business name directly from the listing card
                     business_data = {
                         'name': '',
                         'website': '',
@@ -250,70 +251,149 @@ def scrape_google_maps(business_type, location):
                         'email': '',
                         'instagram': '',
                         'facebook': '',
-                        'tiktok': ''
+                        'tiktok': '',
+                        'twitter': '',
+                        'owner_twitter': ''
                     }
                     
-                    # Get business name with multiple selectors
-                    name_selectors = ['h1', '[data-attrid="title"]', '.x3AX1-LfntMc-header-title-title', '.SPZz6b h1']
-                    for selector in name_selectors:
-                        name_element = page.query_selector(selector)
+                    # Try to get name from the listing card itself first
+                    card_name_selectors = [
+                        '.qBF1Pd',
+                        '.NrDZNb',
+                        '.fontHeadlineSmall',
+                        'a[data-value="Website"]',
+                        '.hfpxzc .fontHeadlineSmall',
+                        'div[aria-label] .fontHeadlineSmall'
+                    ]
+                    
+                    for selector in card_name_selectors:
+                        name_element = listing.query_selector(selector)
                         if name_element:
-                            business_data['name'] = name_element.inner_text().strip()
-                            break
-                    
-                    # Get website with multiple selectors
-                    website_selectors = [
-                        'a[href*="http"]:has-text("Website")',
-                        '[data-value="Website"] a',
-                        'a[data-item-id*="authority"]',
-                        'a[href*="http"]:not([href*="google"])',
-                        '.CsEnBe a[href*="http"]'
-                    ]
-                    for selector in website_selectors:
-                        website_element = page.query_selector(selector)
-                        if website_element:
-                            href = website_element.get_attribute('href')
-                            if href and 'google' not in href and 'maps' not in href:
-                                business_data['website'] = href
+                            potential_name = name_element.inner_text().strip()
+                            
+                            # Filter out invalid names (common UI elements)
+                            invalid_names = [
+                                '結果', 'Results', 'result', 'Search', 'Map', 'Maps',
+                                'Google', 'Loading', 'Error', '', 'undefined', 'null',
+                                'Website', 'Directions', 'Call', 'Save', 'Photos',
+                                'ユーザーからの最新の写真', 'View all', 'See all',
+                                'More photos', 'Latest photos'
+                            ]
+                            
+                            if potential_name and potential_name not in invalid_names and len(potential_name) > 2:
+                                business_data['name'] = potential_name
+                                print(f"   📍 Found name from card: {business_data['name']}")
                                 break
                     
-                    # Get phone number with multiple selectors
-                    phone_selectors = [
-                        'button[data-item-id*="phone"]',
-                        '[data-value*="phone"] span',
-                        'span[data-phone]',
-                        'button:has-text("Call")',
-                        '.z5jxId'
-                    ]
-                    for selector in phone_selectors:
-                        phone_element = page.query_selector(selector)
-                        if phone_element:
-                            phone_text = phone_element.inner_text().strip()
-                            if phone_text and len(phone_text) > 5:
-                                business_data['phone'] = phone_text
-                                break
+                    # Now click on the business to get detailed information (whether we found name in card or not)
+                    if business_data['name']:
+                        print(f"   🔄 Clicking to get details for: {business_data['name']}")
+                    else:
+                        print(f"   🔄 No name in card, trying click method...")
                     
-                    # Get address with multiple selectors
-                    address_selectors = [
-                        'button[data-item-id="address"]',
-                        '[data-value="Address"] div',
-                        '.Io6YTe',
-                        'button:has-text("Directions")',
-                        '.rogA2c'
-                    ]
-                    for selector in address_selectors:
-                        address_element = page.query_selector(selector)
-                        if address_element:
-                            address_text = address_element.inner_text().strip()
-                            if address_text:
-                                business_data['address'] = address_text
-                                break
+                    # Click on the listing to get details
+                    clicked = False
+                    try:
+                        listing.scroll_into_view_if_needed(timeout=2000)
+                        time.sleep(0.3)
+                        listing.click(timeout=3000)
+                        time.sleep(1.5)  # Give more time for detail panel to load
+                        clicked = True
+                    except Exception as click_error:
+                        print(f"   ⚠️ Click failed for business {i+1}: {click_error}")
+                    
+                    # If we don't have a name yet and we clicked successfully, try to get it from detail view
+                    if not business_data['name'] and clicked:
+                        detail_name_selectors = [
+                            'h1', 
+                            '[data-attrid="title"]', 
+                            '.x3AX1-LfntMc-header-title-title', 
+                            '.SPZz6b h1',
+                            '.DUwDvf',
+                            '.qBF1Pd',
+                            '.fontHeadlineSmall',
+                            'h1[data-attrid="title"]',
+                            '[role="main"] h1'
+                        ]
+                        for selector in detail_name_selectors:
+                            name_element = page.query_selector(selector)
+                            if name_element:
+                                potential_name = name_element.inner_text().strip()
+                                
+                                invalid_names = [
+                                    '結果', 'Results', 'result', 'Search', 'Map', 'Maps',
+                                    'Google', 'Loading', 'Error', '', 'undefined', 'null',
+                                    'Photos', 'ユーザーからの最新の写真', 'View all', 'See all'
+                                ]
+                                
+                                if potential_name and potential_name not in invalid_names and len(potential_name) > 2:
+                                    business_data['name'] = potential_name
+                                    print(f"   📍 Found name from detail: {business_data['name']}")
+                                    break
+                    
+                    # Debug: If no name found, skip this business
+                    if not business_data['name']:
+                        print(f"   ⚠️ No business name found for listing {i+1}")
+                        continue
+                    
+                    # Extract contact details only if we successfully clicked
+                    if clicked:
+                        # Get website with multiple selectors
+                        website_selectors = [
+                            'a[href*="http"]:has-text("Website")',
+                            '[data-value="Website"] a',
+                            'a[data-item-id*="authority"]',
+                            'a[href*="http"]:not([href*="google"])',
+                            '.CsEnBe a[href*="http"]'
+                        ]
+                        for selector in website_selectors:
+                            website_element = page.query_selector(selector)
+                            if website_element:
+                                href = website_element.get_attribute('href')
+                                if href and 'google' not in href and 'maps' not in href:
+                                    business_data['website'] = href
+                                    break
+                        
+                        # Get phone number with multiple selectors
+                        phone_selectors = [
+                            'button[data-item-id*="phone"]',
+                            '[data-value*="phone"] span',
+                            'span[data-phone]',
+                            'button:has-text("Call")',
+                            '.z5jxId'
+                        ]
+                        for selector in phone_selectors:
+                            phone_element = page.query_selector(selector)
+                            if phone_element:
+                                phone_text = phone_element.inner_text().strip()
+                                if phone_text and len(phone_text) > 5:
+                                    business_data['phone'] = phone_text
+                                    break
+                        
+                        # Get address with multiple selectors
+                        address_selectors = [
+                            'button[data-item-id="address"]',
+                            '[data-value="Address"] div',
+                            '.Io6YTe',
+                            'button:has-text("Directions")',
+                            '.rogA2c'
+                        ]
+                        for selector in address_selectors:
+                            address_element = page.query_selector(selector)
+                            if address_element:
+                                address_text = address_element.inner_text().strip()
+                                if address_text:
+                                    business_data['address'] = address_text
+                                    break
                     
                     if business_data['name']:
                         businesses.append(business_data)
                         print(f"✅ Added: {business_data['name']}")
+                        print(f"   🌐 Website: {business_data['website'] or 'Not found'}")
+                        print(f"   📧 Email: {business_data['email'] or 'Not found'}")
+                        print(f"   📱 Phone: {business_data['phone'] or 'Not found'}")
                     
-                    time.sleep(0.5)  # Reduced rate limiting
+                    time.sleep(random.uniform(0.8, 1.5))  # Better rate limiting
                     
                 except Exception as e:
                     print(f"⚠️ Error processing business {i+1}: {e}")
@@ -325,7 +405,40 @@ def scrape_google_maps(business_type, location):
         finally:
             browser.close()
     
-    return businesses
+    # Final duplicate removal pass
+    print(f"\n🗒️ Removing any remaining duplicates...")
+    
+    # Remove duplicates based on name similarity
+    seen_names = set()
+    filtered_businesses = []
+    
+    for business in businesses:
+        name_key = business['name'].lower().strip()
+        
+        # Check for exact duplicates
+        if name_key in seen_names:
+            print(f"⏭️ Removing duplicate: {business['name']}")
+            continue
+        
+        # Check for similar names (like "Haywire" vs "Haywire Restaurant")
+        is_similar = False
+        for existing_name in seen_names:
+            if name_key in existing_name or existing_name in name_key:
+                # If one name contains the other and they're similar length
+                shorter = min(name_key, existing_name, key=len)
+                longer = max(name_key, existing_name, key=len)
+                if len(shorter) / len(longer) > 0.7:  # 70% similarity threshold
+                    print(f"⏭️ Removing similar duplicate: {business['name']} (similar to existing)")
+                    is_similar = True
+                    break
+        
+        if not is_similar:
+            seen_names.add(name_key)
+            filtered_businesses.append(business)
+    
+    print(f"📊 Final count: {len(filtered_businesses)} unique businesses (removed {len(businesses) - len(filtered_businesses)} duplicates)")
+    
+    return filtered_businesses
 
 def extract_emails_from_text(text):
     """Extract email addresses from text using regex"""
@@ -338,7 +451,9 @@ def extract_social_media_links(text, base_url):
     social_links = {
         'instagram': '',
         'facebook': '',
-        'tiktok': ''
+        'tiktok': '',
+        'twitter': '',
+        'owner_twitter': ''
     }
     
     # Instagram patterns
@@ -358,6 +473,13 @@ def extract_social_media_links(text, base_url):
     tiktok_patterns = [
         r'https?://(?:www\.)?tiktok\.com/@[a-zA-Z0-9_.]+/?',
         r'tiktok\.com/@[a-zA-Z0-9_.]+/?'
+    ]
+    
+    # Twitter/X patterns
+    twitter_patterns = [
+        r'https?://(?:www\.)?(?:twitter\.com|x\.com)/[a-zA-Z0-9_]+/?',
+        r'(?:twitter\.com|x\.com)/[a-zA-Z0-9_]+/?',
+        r'@[a-zA-Z0-9_]+(?=\s|$)'
     ]
     
     # Extract Instagram
@@ -393,31 +515,86 @@ def extract_social_media_links(text, base_url):
             social_links['tiktok'] = link
             break
     
+    # Extract Twitter/X
+    for pattern in twitter_patterns:
+        matches = re.findall(pattern, text, re.IGNORECASE)
+        if matches:
+            link = matches[0]
+            if not link.startswith('http'):
+                if link.startswith('@'):
+                    link = f"https://x.com/{link[1:]}"
+                else:
+                    link = f"https://{link}"
+            # Convert old twitter.com links to x.com
+            link = link.replace('twitter.com', 'x.com')
+            social_links['twitter'] = link
+            break
+    
     return social_links
 
-def scrape_website_info(url):
-    """Scrape website for email and social media information"""
-    import requests
-    from bs4 import BeautifulSoup
-    
-    if not url or not url.startswith('http'):
-        return {'email': '', 'instagram': '', 'facebook': '', 'tiktok': ''}
-    
-    try:
-        headers = {
-            'User-Agent': get_random_user_agent(),
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+# Global session with optimized connection pooling
+_global_session = None
+_website_cache = {}  # Simple cache for website scraping results
+
+def get_optimized_session():
+    """Get or create an optimized requests session with connection pooling"""
+    global _global_session
+    if _global_session is None:
+        import requests
+        from requests.adapters import HTTPAdapter
+        from urllib3.util.retry import Retry
+        
+        _global_session = requests.Session()
+        
+        # Optimized retry strategy
+        retry_strategy = Retry(
+            total=2,  # Reduced retries for speed
+            status_forcelist=[429, 500, 502, 503, 504],
+            backoff_factor=0.3  # Faster backoff
+        )
+        
+        # Connection pooling adapter
+        adapter = HTTPAdapter(
+            pool_connections=20,  # Increased pool size
+            pool_maxsize=20,
+            max_retries=retry_strategy,
+            pool_block=False
+        )
+        
+        _global_session.mount("http://", adapter)
+        _global_session.mount("https://", adapter)
+        
+        # Optimized headers
+        _global_session.headers.update({
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             'Accept-Language': 'en-US,en;q=0.5',
-            'Accept-Encoding': 'gzip, deflate',
+            'Accept-Encoding': 'gzip, deflate, br',
             'Connection': 'keep-alive',
             'Upgrade-Insecure-Requests': '1'
-        }
+        })
+    
+    return _global_session
+
+def scrape_website_info(url):
+    """Scrape website for email and social media information with caching"""
+    from bs4 import BeautifulSoup
+    from bs4 import Tag
+    
+    if not url or not url.startswith('http'):
+        return {'email': '', 'instagram': '', 'facebook': '', 'tiktok': '', 'twitter': '', 'owner_twitter': ''}
+    
+    # Check cache first
+    global _website_cache
+    if url in _website_cache:
+        print(f"   📋 Cache hit for: {url}")
+        return _website_cache[url]
+    
+    try:
+        session = get_optimized_session()
+        session.headers['User-Agent'] = get_random_user_agent()
         
-        session = requests.Session()
-        session.headers.update(headers)
-        
-        # Try to get the main page with faster timeout
-        response = session.get(url, timeout=5)
+        # Optimized request with faster timeout
+        response = session.get(url, timeout=3, stream=False)
         response.raise_for_status()
         
         soup = BeautifulSoup(response.content, 'html.parser')
@@ -434,16 +611,18 @@ def scrape_website_info(url):
         
         # Try to find contact page
         contact_urls = []
-        for link in soup.find_all('a', href=True):
-            href = link['href'].lower()
-            if any(word in href for word in ['contact', 'about', 'connect']):
-                contact_urls.append(urljoin(url, link['href']))
+        for link in soup.find_all('a'):
+            if isinstance(link, Tag):
+                href = link.get('href')
+                if href:
+                    href_lower = href.lower()
+                    if any(word in href_lower for word in ['contact', 'about', 'connect']):
+                        contact_urls.append(urljoin(url, href))
         
-        # Scrape contact pages for additional info - optimized
+        # Scrape contact pages for additional info - heavily optimized
         for contact_url in contact_urls[:1]:  # Only check first contact page for speed
             try:
-                time.sleep(0.5)  # Reduced rate limiting
-                contact_response = session.get(contact_url, timeout=5)
+                contact_response = session.get(contact_url, timeout=2)  # Faster timeout
                 contact_response.raise_for_status()
                 
                 contact_soup = BeautifulSoup(contact_response.content, 'html.parser')
@@ -467,16 +646,96 @@ def scrape_website_info(url):
         # Clean up emails and remove duplicates
         emails = list(set([email.lower() for email in emails if email]))
         
-        return {
+        result = {
             'email': emails[0] if emails else '',
             'instagram': social_links['instagram'],
             'facebook': social_links['facebook'],
-            'tiktok': social_links['tiktok']
+            'tiktok': social_links['tiktok'],
+            'twitter': social_links['twitter'],
+            'owner_twitter': social_links['owner_twitter']
         }
+        
+        # Cache the result
+        _website_cache[url] = result
+        return result
         
     except Exception as e:
         print(f"⚠️ Error scraping website {url}: {e}")
-        return {'email': '', 'instagram': '', 'facebook': '', 'tiktok': ''}
+        result = {'email': '', 'instagram': '', 'facebook': '', 'tiktok': '', 'twitter': '', 'owner_twitter': ''}
+        # Cache empty result to avoid retrying failed URLs
+        _website_cache[url] = result
+        return result
+
+def search_twitter_accounts(business_name, browser_context=None):
+    """Search for Twitter/X accounts related to the business and potential owners - optimized"""
+    twitter_data = {'twitter': '', 'owner_twitter': ''}
+    
+    try:
+        if browser_context:
+            # Reuse existing browser context
+            page = browser_context.new_page()
+        else:
+            # Fallback to creating new context
+            from playwright.sync_api import sync_playwright
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=True)
+                context = browser.new_context(
+                    user_agent=get_random_user_agent(),
+                    viewport={'width': 1280, 'height': 720}
+                )
+                page = context.new_page()
+            
+            # Search for business on X
+            search_query = business_name.replace(' ', '%20')
+            search_url = f"https://x.com/search?q={search_query}&src=typed_query&f=user"
+            
+            try:
+                page.goto(search_url, wait_until='networkidle', timeout=8000)
+                time.sleep(1)  # Reduced wait time
+                
+                # Look for user profiles in search results
+                profile_selectors = [
+                    '[data-testid="UserCell"] a[href*="/"]',
+                    '[data-testid="User-Name"] a',
+                    'a[href*="x.com/"]:has-text("@")'
+                ]
+                
+                for selector in profile_selectors:
+                    profiles = page.query_selector_all(selector)
+                    if profiles:
+                        for profile in profiles[:3]:  # Check first 3 results
+                            href = profile.get_attribute('href')
+                            if href and '/' in href:
+                                username = href.split('/')[-1]
+                                if username and not username.startswith('search'):
+                                    profile_url = f"https://x.com/{username}"
+                                    
+                                    # Check if this looks like a business account
+                                    profile_text = profile.inner_text().lower()
+                                    business_keywords = business_name.lower().split()
+                                    
+                                    if any(keyword in profile_text for keyword in business_keywords):
+                                        if not twitter_data['twitter']:
+                                            twitter_data['twitter'] = profile_url
+                                            print(f"   🐦 Found business Twitter: {profile_url}")
+                                        elif not twitter_data['owner_twitter'] and 'owner' in profile_text or 'founder' in profile_text or 'ceo' in profile_text:
+                                            twitter_data['owner_twitter'] = profile_url
+                                            print(f"   👤 Found owner Twitter: {profile_url}")
+                                        break
+                        break
+                        
+            except Exception as e:
+                print(f"   ⚠️ Twitter search failed: {e}")
+            
+            if not browser_context:
+                browser.close()  # Only close if we created it
+            else:
+                page.close()  # Just close the page if reusing context
+            
+    except Exception as e:
+        print(f"   ⚠️ Twitter search error: {e}")
+    
+    return twitter_data
 
 def enrich_business_data(businesses):
     """Enrich business data with website information using parallel processing"""
@@ -490,7 +749,7 @@ def enrich_business_data(businesses):
     businesses_without_websites = [b for b in businesses if not b['website']]
     
     def scrape_single_business(business_data):
-        """Scrape a single business website"""
+        """Scrape a single business website - optimized"""
         try:
             print(f"🔍 Scraping website: {business_data['name']}")
             website_info = scrape_website_info(business_data['website'])
@@ -499,16 +758,17 @@ def enrich_business_data(businesses):
             business_data['instagram'] = website_info['instagram']
             business_data['facebook'] = website_info['facebook']
             business_data['tiktok'] = website_info['tiktok']
+            business_data['twitter'] = website_info['twitter']
+            business_data['owner_twitter'] = website_info['owner_twitter']
             
-            # Small delay to be respectful
-            time.sleep(random.uniform(0.5, 1.5))
+            # Removed artificial delay for speed
             return business_data
         except Exception as e:
             print(f"⚠️ Error scraping {business_data['name']}: {e}")
             return business_data
     
-    # Use ThreadPoolExecutor for concurrent website scraping
-    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+    # Use ThreadPoolExecutor for concurrent website scraping - increased workers
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
         # Submit all website scraping tasks
         future_to_business = {
             executor.submit(scrape_single_business, business): business 
@@ -527,7 +787,38 @@ def enrich_business_data(businesses):
     for business in businesses_without_websites:
         print(f"⚠️ No website found for: {business['name']}")
     
+    # Search for Twitter/X accounts with shared browser context - optimized
+    businesses_needing_twitter = [b for b in businesses if not b['twitter'] and not b['owner_twitter']]
+    
+    if businesses_needing_twitter:
+        print(f"\n🐦 Searching for Twitter/X accounts for {len(businesses_needing_twitter)} businesses...")
+        
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            # Create one browser context for all Twitter searches
+            browser = p.chromium.launch(headless=True, args=[
+                '--no-sandbox', '--disable-dev-shm-usage', '--disable-images',
+                '--disable-gpu', '--disable-extensions', '--disable-plugins'
+            ])
+            context = browser.new_context(
+                user_agent=get_random_user_agent(),
+                viewport={'width': 1280, 'height': 720}
+            )
+            
+            # Process Twitter searches with shared context
+            for business in businesses_needing_twitter[:10]:  # Limit to first 10 for speed
+                print(f"🔍 Searching Twitter for: {business['name']}")
+                twitter_data = search_twitter_accounts(business['name'], context)
+                if not business['twitter'] and twitter_data['twitter']:
+                    business['twitter'] = twitter_data['twitter']
+                if not business['owner_twitter'] and twitter_data['owner_twitter']:
+                    business['owner_twitter'] = twitter_data['owner_twitter']
+                time.sleep(random.uniform(0.5, 1.0))  # Reduced rate limiting
+            
+            browser.close()
+    
     return businesses
+
 
 def save_to_csv(businesses, business_type, location):
     """Save business data to CSV file"""
@@ -537,7 +828,7 @@ def save_to_csv(businesses, business_type, location):
     # Remove any characters that might cause issues in filename
     filename = re.sub(r'[^\w\-_\.]', '', filename)
     
-    fieldnames = ['Business Name', 'Website', 'Email', 'Phone', 'Address', 'Instagram', 'Facebook', 'TikTok']
+    fieldnames = ['Business Name', 'Website', 'Email', 'Phone', 'Address', 'Instagram', 'Facebook', 'TikTok', 'Twitter', 'Owner Twitter']
     
     with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
@@ -552,7 +843,9 @@ def save_to_csv(businesses, business_type, location):
                 'Address': business['address'],
                 'Instagram': business['instagram'],
                 'Facebook': business['facebook'],
-                'TikTok': business['tiktok']
+                'TikTok': business['tiktok'],
+                'Twitter': business['twitter'],
+                'Owner Twitter': business['owner_twitter']
             })
     
     return filename
@@ -600,7 +893,7 @@ def save_to_google_sheets(businesses, business_type, location, credentials_file=
         worksheet = spreadsheet.sheet1
         
         # Prepare data
-        headers = ['Business Name', 'Website', 'Email', 'Phone', 'Address', 'Instagram', 'Facebook', 'TikTok']
+        headers = ['Business Name', 'Website', 'Email', 'Phone', 'Address', 'Instagram', 'Facebook', 'TikTok', 'Twitter', 'Owner Twitter']
         data = [headers]
         
         for business in businesses:
@@ -612,7 +905,9 @@ def save_to_google_sheets(businesses, business_type, location, credentials_file=
                 business['address'],
                 business['instagram'],
                 business['facebook'],
-                business['tiktok']
+                business['tiktok'],
+                business['twitter'],
+                business['owner_twitter']
             ]
             data.append(row)
         
