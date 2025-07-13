@@ -127,52 +127,26 @@ def scrape_google_maps(business_type, location):
     
     with sync_playwright() as p:
         browser = p.chromium.launch(
-            headless=True,
+            headless=True, 
             args=[
-                '--no-sandbox',
+                '--no-sandbox', 
                 '--disable-dev-shm-usage',
                 '--disable-blink-features=AutomationControlled',
                 '--disable-extensions',
                 '--disable-plugins',
                 '--disable-images',
                 '--disable-gpu',
-                '--disable-web-security',
-                '--disable-features=TranslateUI',
-                '--disable-ipc-flooding-protection',
-                '--disable-renderer-backgrounding',
-                '--disable-backgrounding-occluded-windows',
-                '--disable-client-side-phishing-detection',
-                '--disable-sync',
-                '--disable-default-apps',
-                '--no-first-run',
-                '--no-default-browser-check',
                 '--memory-pressure-off',
-                '--max_old_space_size=4096',
-                '--aggressive-cache-discard',
-                '--disable-background-timer-throttling',
-                '--disable-hang-monitor',
-                '--disable-prompt-on-repost',
-                '--disable-background-networking',
-                '--disable-breakpad',
-                '--disable-component-extensions-with-background-pages',
-                '--disable-features=AudioServiceOutOfProcess',
-                '--disable-domain-reliability'
+                '--max_old_space_size=4096'
             ]
         )
         context = browser.new_context(
             user_agent=get_random_user_agent(),
-            viewport={'width': 1280, 'height': 720},  # Smaller viewport for speed
+            viewport={'width': 1920, 'height': 1080},
             locale='en-US',
             timezone_id='America/New_York',
             java_script_enabled=True,
-            ignore_https_errors=True,
-            bypass_csp=True,
-            extra_http_headers={
-                'Accept-Language': 'en-US,en;q=0.9',
-                'Accept-Encoding': 'gzip, deflate',
-                'Connection': 'keep-alive',
-                'Upgrade-Insecure-Requests': '1'
-            }
+            ignore_https_errors=True
         )
         page = context.new_page()
         
@@ -182,21 +156,21 @@ def scrape_google_maps(business_type, location):
             maps_url = f"https://www.google.com/maps/search/{search_query.replace(' ', '+')}"
             
             print(f"🌐 Navigating to: {maps_url}")
-            page.goto(maps_url, wait_until='networkidle', timeout=20000)
+            page.goto(maps_url, wait_until='domcontentloaded', timeout=30000)
+            time.sleep(2)
             
-            # Wait for results to load with optimized selectors
+            # Wait for results to load
             try:
-                page.wait_for_selector('[role="main"], .hfpxzc, [data-result-index]', timeout=10000)
+                page.wait_for_selector('[role="main"]', timeout=15000)
             except:
-                print("⚠️ Main selectors failed, trying backup...")
-                page.wait_for_selector('div[jsaction], a[data-cid]', timeout=8000)
+                # Try alternative selector if main fails
+                page.wait_for_selector('[data-value="Directions"]', timeout=15000)
             
-            # Optimized scrolling - faster and more efficient
+            # Scroll to load more results - optimized
             print("📜 Loading more results...")
-            page.evaluate('document.querySelector("[role=main]")?.scrollTo(0, 2000)')
-            time.sleep(0.5)
-            page.evaluate('document.querySelector("[role=main]")?.scrollTo(0, 4000)')
-            time.sleep(0.5)
+            for i in range(3):  # Reduced scrolling for speed
+                page.evaluate('window.scrollTo(0, document.body.scrollHeight)')
+                time.sleep(1)  # Reduced wait time
             
             # Find all business listings with multiple selectors
             selectors_tried = []
@@ -532,69 +506,30 @@ def extract_social_media_links(text, base_url):
     
     return social_links
 
-# Global session with optimized connection pooling
-_global_session = None
-_website_cache = {}  # Simple cache for website scraping results
-
-def get_optimized_session():
-    """Get or create an optimized requests session with connection pooling"""
-    global _global_session
-    if _global_session is None:
-        import requests
-        from requests.adapters import HTTPAdapter
-        from urllib3.util.retry import Retry
-        
-        _global_session = requests.Session()
-        
-        # Optimized retry strategy
-        retry_strategy = Retry(
-            total=2,  # Reduced retries for speed
-            status_forcelist=[429, 500, 502, 503, 504],
-            backoff_factor=0.3  # Faster backoff
-        )
-        
-        # Connection pooling adapter
-        adapter = HTTPAdapter(
-            pool_connections=20,  # Increased pool size
-            pool_maxsize=20,
-            max_retries=retry_strategy,
-            pool_block=False
-        )
-        
-        _global_session.mount("http://", adapter)
-        _global_session.mount("https://", adapter)
-        
-        # Optimized headers
-        _global_session.headers.update({
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.5',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1'
-        })
-    
-    return _global_session
-
 def scrape_website_info(url):
-    """Scrape website for email and social media information with caching"""
+    """Scrape website for email and social media information"""
+    import requests
     from bs4 import BeautifulSoup
     from bs4 import Tag
     
     if not url or not url.startswith('http'):
-        return {'email': '', 'instagram': '', 'facebook': '', 'tiktok': '', 'twitter': '', 'owner_twitter': ''}
+        return {'email': '', 'instagram': '', 'facebook': '', 'tiktok': ''}
     
-    # Check cache first
-    global _website_cache
-    if url in _website_cache:
-        print(f"   📋 Cache hit for: {url}")
-        return _website_cache[url]
-    
-    try:
-        session = get_optimized_session()
-        session.headers['User-Agent'] = get_random_user_agent()
+
+        headers = {
+            'User-Agent': get_random_user_agent(),
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1'
+        }
         
-        # Optimized request with faster timeout
-        response = session.get(url, timeout=3, stream=False)
+        session = requests.Session()
+        session.headers.update(headers)
+        
+        # Try to get the main page with faster timeout
+        response = session.get(url, timeout=5)
         response.raise_for_status()
         
         soup = BeautifulSoup(response.content, 'html.parser')
@@ -619,10 +554,11 @@ def scrape_website_info(url):
                     if any(word in href_lower for word in ['contact', 'about', 'connect']):
                         contact_urls.append(urljoin(url, href))
         
-        # Scrape contact pages for additional info - heavily optimized
+        # Scrape contact pages for additional info - optimized
         for contact_url in contact_urls[:1]:  # Only check first contact page for speed
             try:
-                contact_response = session.get(contact_url, timeout=2)  # Faster timeout
+                time.sleep(0.5)  # Reduced rate limiting
+                contact_response = session.get(contact_url, timeout=5)
                 contact_response.raise_for_status()
                 
                 contact_soup = BeautifulSoup(contact_response.content, 'html.parser')
@@ -646,96 +582,16 @@ def scrape_website_info(url):
         # Clean up emails and remove duplicates
         emails = list(set([email.lower() for email in emails if email]))
         
-        result = {
+        return {
             'email': emails[0] if emails else '',
             'instagram': social_links['instagram'],
             'facebook': social_links['facebook'],
-            'tiktok': social_links['tiktok'],
-            'twitter': social_links['twitter'],
-            'owner_twitter': social_links['owner_twitter']
+            'tiktok': social_links['tiktok']
         }
-        
-        # Cache the result
-        _website_cache[url] = result
-        return result
         
     except Exception as e:
         print(f"⚠️ Error scraping website {url}: {e}")
-        result = {'email': '', 'instagram': '', 'facebook': '', 'tiktok': '', 'twitter': '', 'owner_twitter': ''}
-        # Cache empty result to avoid retrying failed URLs
-        _website_cache[url] = result
-        return result
-
-def search_twitter_accounts(business_name, browser_context=None):
-    """Search for Twitter/X accounts related to the business and potential owners - optimized"""
-    twitter_data = {'twitter': '', 'owner_twitter': ''}
-    
-    try:
-        if browser_context:
-            # Reuse existing browser context
-            page = browser_context.new_page()
-        else:
-            # Fallback to creating new context
-            from playwright.sync_api import sync_playwright
-            with sync_playwright() as p:
-                browser = p.chromium.launch(headless=True)
-                context = browser.new_context(
-                    user_agent=get_random_user_agent(),
-                    viewport={'width': 1280, 'height': 720}
-                )
-                page = context.new_page()
-            
-            # Search for business on X
-            search_query = business_name.replace(' ', '%20')
-            search_url = f"https://x.com/search?q={search_query}&src=typed_query&f=user"
-            
-            try:
-                page.goto(search_url, wait_until='networkidle', timeout=8000)
-                time.sleep(1)  # Reduced wait time
-                
-                # Look for user profiles in search results
-                profile_selectors = [
-                    '[data-testid="UserCell"] a[href*="/"]',
-                    '[data-testid="User-Name"] a',
-                    'a[href*="x.com/"]:has-text("@")'
-                ]
-                
-                for selector in profile_selectors:
-                    profiles = page.query_selector_all(selector)
-                    if profiles:
-                        for profile in profiles[:3]:  # Check first 3 results
-                            href = profile.get_attribute('href')
-                            if href and '/' in href:
-                                username = href.split('/')[-1]
-                                if username and not username.startswith('search'):
-                                    profile_url = f"https://x.com/{username}"
-                                    
-                                    # Check if this looks like a business account
-                                    profile_text = profile.inner_text().lower()
-                                    business_keywords = business_name.lower().split()
-                                    
-                                    if any(keyword in profile_text for keyword in business_keywords):
-                                        if not twitter_data['twitter']:
-                                            twitter_data['twitter'] = profile_url
-                                            print(f"   🐦 Found business Twitter: {profile_url}")
-                                        elif not twitter_data['owner_twitter'] and 'owner' in profile_text or 'founder' in profile_text or 'ceo' in profile_text:
-                                            twitter_data['owner_twitter'] = profile_url
-                                            print(f"   👤 Found owner Twitter: {profile_url}")
-                                        break
-                        break
-                        
-            except Exception as e:
-                print(f"   ⚠️ Twitter search failed: {e}")
-            
-            if not browser_context:
-                browser.close()  # Only close if we created it
-            else:
-                page.close()  # Just close the page if reusing context
-            
-    except Exception as e:
-        print(f"   ⚠️ Twitter search error: {e}")
-    
-    return twitter_data
+        return {'email': '', 'instagram': '', 'facebook': '', 'tiktok': ''}
 
 def enrich_business_data(businesses):
     """Enrich business data with website information using parallel processing"""
@@ -749,7 +605,7 @@ def enrich_business_data(businesses):
     businesses_without_websites = [b for b in businesses if not b['website']]
     
     def scrape_single_business(business_data):
-        """Scrape a single business website - optimized"""
+        """Scrape a single business website"""
         try:
             print(f"🔍 Scraping website: {business_data['name']}")
             website_info = scrape_website_info(business_data['website'])
@@ -758,17 +614,16 @@ def enrich_business_data(businesses):
             business_data['instagram'] = website_info['instagram']
             business_data['facebook'] = website_info['facebook']
             business_data['tiktok'] = website_info['tiktok']
-            business_data['twitter'] = website_info['twitter']
-            business_data['owner_twitter'] = website_info['owner_twitter']
             
-            # Removed artificial delay for speed
+            # Small delay to be respectful
+            time.sleep(random.uniform(0.5, 1.5))
             return business_data
         except Exception as e:
             print(f"⚠️ Error scraping {business_data['name']}: {e}")
             return business_data
     
-    # Use ThreadPoolExecutor for concurrent website scraping - increased workers
-    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+    # Use ThreadPoolExecutor for concurrent website scraping
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
         # Submit all website scraping tasks
         future_to_business = {
             executor.submit(scrape_single_business, business): business 
@@ -786,36 +641,6 @@ def enrich_business_data(businesses):
     # Add businesses without websites back to the list
     for business in businesses_without_websites:
         print(f"⚠️ No website found for: {business['name']}")
-    
-    # Search for Twitter/X accounts with shared browser context - optimized
-    businesses_needing_twitter = [b for b in businesses if not b['twitter'] and not b['owner_twitter']]
-    
-    if businesses_needing_twitter:
-        print(f"\n🐦 Searching for Twitter/X accounts for {len(businesses_needing_twitter)} businesses...")
-        
-        from playwright.sync_api import sync_playwright
-        with sync_playwright() as p:
-            # Create one browser context for all Twitter searches
-            browser = p.chromium.launch(headless=True, args=[
-                '--no-sandbox', '--disable-dev-shm-usage', '--disable-images',
-                '--disable-gpu', '--disable-extensions', '--disable-plugins'
-            ])
-            context = browser.new_context(
-                user_agent=get_random_user_agent(),
-                viewport={'width': 1280, 'height': 720}
-            )
-            
-            # Process Twitter searches with shared context
-            for business in businesses_needing_twitter[:10]:  # Limit to first 10 for speed
-                print(f"🔍 Searching Twitter for: {business['name']}")
-                twitter_data = search_twitter_accounts(business['name'], context)
-                if not business['twitter'] and twitter_data['twitter']:
-                    business['twitter'] = twitter_data['twitter']
-                if not business['owner_twitter'] and twitter_data['owner_twitter']:
-                    business['owner_twitter'] = twitter_data['owner_twitter']
-                time.sleep(random.uniform(0.5, 1.0))  # Reduced rate limiting
-            
-            browser.close()
     
     return businesses
 
