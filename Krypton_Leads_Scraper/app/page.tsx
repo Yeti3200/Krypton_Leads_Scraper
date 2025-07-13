@@ -5,7 +5,7 @@ import React, { useState } from 'react'
 export default function HomePage() {
   const [businessType, setBusinessType] = useState('')
   const [location, setLocation] = useState('')
-  const [results, setResults] = useState([])
+  const [results, setResults] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
 
   const handleScrape = async () => {
