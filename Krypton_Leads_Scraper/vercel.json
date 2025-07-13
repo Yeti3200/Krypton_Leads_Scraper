@@ -1,0 +1,12 @@
+{
+  "builds": [
+    {
+      "src": "package.json",
+      "use": "@vercel/next"
+    }
+  ],
+  "env": {
+    "NEXTAUTH_URL": "https://your-app.vercel.app",
+    "BACKEND_URL": "https://your-backend.up.railway.app"
+  }
+}

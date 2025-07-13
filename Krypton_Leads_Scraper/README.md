@@ -61,35 +61,31 @@ cd backend
 uvicorn main:app --reload
 ```
 
-## 🔧 Render Deployment
+## 🚀 Vercel + Railway Deployment
 
-Your Render Pro account setup:
+**Why this is better than Render:**
+- **5x cheaper**: $13/month vs $67/month
+- **Faster**: Better performance for scraping
+- **Simpler**: Less configuration needed
 
-### 1. Create Services
+### 1. Frontend: Vercel (Free)
 
 ```bash
-# Push to GitHub first
-git add .
-git commit -m "🚀 Complete SaaS platform"
-git push origin main
+npm i -g vercel
+vercel --prod
 ```
 
-### 2. Render Configuration
+### 2. Backend: Railway ($5/month)
 
-1. **PostgreSQL Database**: `krypton-db`
-2. **Redis Instance**: `krypton-redis`  
-3. **Web Service (Backend)**: `krypton-backend`
-4. **Static Site (Frontend)**: `krypton-frontend`
-
-### 3. Environment Variables
-
-Set these in Render dashboard:
-
+```bash
+npm i -g @railway/cli
+railway login
+railway up
 ```
-STRIPE_SECRET_KEY=sk_live_...
-STRIPE_WEBHOOK_SECRET=whsec_...
-NEXTAUTH_SECRET=<generate-secure-secret>
-```
+
+### 3. Complete Setup Guide
+
+See [DEPLOYMENT.md](./DEPLOYMENT.md) for detailed instructions.
 
 ## 💳 Stripe Integration
 
