@@ -13,7 +13,7 @@ export default function HomePage() {
     
     setLoading(true)
     try {
-      const response = await fetch('https://YOUR-RAILWAY-URL.up.railway.app/scrape', {
+      const response = await fetch('https://kryptonleadsscraper-production.up.railway.app/scrape', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
