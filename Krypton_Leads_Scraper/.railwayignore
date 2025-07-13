@@ -1,0 +1,5 @@
+app/
+*.js
+*.json
+!backend/
+!nixpacks.toml
