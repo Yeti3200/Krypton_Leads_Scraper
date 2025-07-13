@@ -6,6 +6,17 @@ export const metadata = {
   description: 'Simple lead generation tool',
 }
 
+// Global error handling
+if (typeof window === 'undefined') {
+  process.on('uncaughtException', (error) => {
+    console.error('Uncaught Exception:', error)
+  })
+  
+  process.on('unhandledRejection', (reason, promise) => {
+    console.error('Unhandled Rejection at:', promise, 'reason:', reason)
+  })
+}
+
 export default function RootLayout({
   children,
 }: {
